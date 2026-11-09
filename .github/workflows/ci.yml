@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: requirements*.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+      - name: Run tests
+        run: pytest -v --cov=app --cov-report=term-missing
+
+  migrations:
+    # Os testes usam SQLite; este job aplica as migrações em um PostgreSQL de verdade.
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: bank_user
+          POSTGRES_PASSWORD: ci_only_password
+          POSTGRES_DB: mini_bank
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U bank_user -d mini_bank"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      ENVIRONMENT: test
+      DATABASE_URL: postgresql+psycopg2://bank_user:ci_only_password@localhost:5432/mini_bank
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: requirements*.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Apply migrations (upgrade, downgrade, upgrade)
+        run: |
+          alembic upgrade head
+          alembic downgrade base
+          alembic upgrade head
